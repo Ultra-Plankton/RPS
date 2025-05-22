@@ -33,7 +33,7 @@ pyotp==2.6.0
 pytesseract==0.3.13
 python-dotenv==0.20.0
 pytwain==2.3.0
-pywin32==308
+pywin32==310
 redis==5.2.1
 requests==2.28.1
 robin-stocks==2.1.0
