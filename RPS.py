@@ -180,6 +180,7 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
     await player1.send(final_message)
     await player2.send(final_message)
 
+@bot.tree.command(
     name="update",
     description="Pull latest from GitHub and redeploy on Render"
 
