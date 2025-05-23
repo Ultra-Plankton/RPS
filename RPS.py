@@ -4,10 +4,12 @@ import asyncio
 import random
 import logging
 import requests 
-from discord import app_commands
+from discord import app_commands, Member
+from discord import Message
 from discord.ext import commands
 from keep_alive import keep_alive
 from dotenv import load_dotenv
+from typing import cast
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +32,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 def is_guild_admin(interaction: discord.Interaction) -> bool:
     # must be used in a guild context
+    guild = interaction.guild
+    if guild is None:
+        return False
+    member = cast(Member, interaction.user)
+    return member.guild_permissions.administrator
     return interaction.user.guild_permissions.administrator
 
 EMOJI_TO_MOVE = {
@@ -76,8 +83,10 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
         f"First to {wins} wins."
     )
 
-    score = {player1.id: 0, player2.id: 0}
+    score = {player1.id: 0, player2.id: 0, "ties": 0}
     round_num = 1
+    
+    scoreboard_message = None
 
     while score[player1.id] < wins and score[player2.id] < wins:
         messages = {}
@@ -143,14 +152,12 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
             return
 
         winner = determine_winner(move1, move2)
-        ties = score.get("ties", 0)
         if winner == 0:
-            ties += 1
+            score["ties"] += 1
         elif winner == 1:
             score[player1.id] += 1
         else:
             score[player2.id] += 1
-        score["ties"] = ties
 
         def format_score(final=False):
             header = f"**{desc}**\n------------\n" if desc else ""
@@ -168,7 +175,9 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
             await player1.send(format_score())
             await player2.send(format_score())
         else:
-            await scoreboard_message.edit(content=format_score())
+            message = cast(Message, scoreboard_message)
+            if scoreboard_message is None:
+                raise RuntimeError("scoreboard_message was never initialized")
             await player1.send(format_score())
             await player2.send(format_score())
 
@@ -176,7 +185,9 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
 
     overall_winner = player1 if score[player1.id] == wins else player2
     final_message = format_score(final=True)
-    await scoreboard_message.edit(content=final_message)
+    message = cast(Message, scoreboard_message)
+    if scoreboard_message is None:
+        raise RuntimeError("scoreboard_message was never initialized")
     await player1.send(final_message)
     await player2.send(final_message)
 
