@@ -183,7 +183,7 @@ async def rps(interaction: discord.Interaction, player1: discord.User, player2: 
     name="update",
     description="Pull latest from GitHub and redeploy on Render"
 
-@app_commands.checks(is_guild_admin)
+@app_commands.check(is_guild_admin)
 async def update(interaction: discord.Interaction):
     hook_url = os.getenv("RENDER_DEPLOY_HOOK_URL")
     if not hook_url:
