@@ -1,8 +1,7 @@
-name: Notify Discord on Push
-
 on:
   push:
-    branches: [ main ]  # or your default branch
+    branches: [ main ]
+  workflow_dispatch:    # allows manual runs
 
 jobs:
   notify:
@@ -13,7 +12,10 @@ jobs:
         with:
           script: |
             const commit = github.event.head_commit;
-            if (!commit) return;
+            if (!commit) {
+              console.log("No head_commit found (this was a manual run), skipping notification.");
+              return;
+            }
             const repo = github.event.repository.full_name;
             const msg = `📝 **${repo}** pushed by **${commit.author.name}**:\n> ${commit.message}\n${commit.url}`;
             await fetch(process.env.DISCORD_WEBHOOK, {
