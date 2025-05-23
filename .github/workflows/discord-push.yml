@@ -3,7 +3,7 @@ name: Notify Discord on Push
 on:
   push:
     branches:
-      - main    # or master if that’s your default
+      - main      # ← change if your default branch is different
   workflow_dispatch:
 
 jobs:
@@ -14,13 +14,15 @@ jobs:
       - name: Dump entire event for debugging
         run: |
           echo "GITHUB EVENT:"
-          echo "${{ toJson(github.context.payload) }}"
+          echo "${{ toJson(github.event) }}"
 
       - name: Send Discord notification
         uses: actions/github-script@v6
         with:
           script: |
-            const payload = github.context.payload;
+            // use the provided `context` object
+            const payload = context.payload;
+
             if (!payload.head_commit) {
               console.log("⚠️ No head_commit, skipping Discord post.");
               return;
@@ -32,8 +34,8 @@ jobs:
             console.log("✅ Posting to Discord:", msg);
 
             await fetch(process.env.DISCORD_WEBHOOK, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ content: msg })
             });
         env:
