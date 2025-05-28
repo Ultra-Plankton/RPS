@@ -253,4 +253,11 @@ async def update(interaction: discord.Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="ping", description="Check if the bot is up and see its latency.")
+async def ping(interaction: discord.Interaction):
+    # bot.latency is a float of seconds, so we convert to ms
+    latency_ms = round(bot.latency * 1000)
+    await interaction.response.send_message(f"Pong! 🏓 Latency: {latency_ms}ms", ephemeral=True)
+
+
 bot.run(TOKEN)
