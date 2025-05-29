@@ -22,7 +22,6 @@ keep_alive()
 
 # Intents
 intents = discord.Intents.default()
-intents.messages = True
 intents.message_content = True
 intents.dm_messages = True
 intents.reactions = True
@@ -147,6 +146,7 @@ async def rps(
 
     # Initialize tracking
     score = {player1.id: 0, player2.id: 0, "ties": 0}
+    move_history = {player1.id: [], player2.id: []}  # Stores all moves (e.g., ["✊", "✋", "✌️"])
     last_move = {player1.id: "❔", player2.id: "❔"}
     round_num = 1
     scoreboard_message: Optional[discord.Message] = None
@@ -155,8 +155,8 @@ async def rps(
         header = f"**{desc}**\n" if desc else ""
         moves_text = (
             f"**Moves:**\n"
-            f"{player1.mention}: {last_move[player1.id]}\n"
-            f"{player2.mention}: {last_move[player2.id]}\n\n"
+    f"{player1.mention}: {', '.join(move_history[player1.id])}\n"
+    f"{player2.mention}: {', '.join(move_history[player2.id])}\n\n"
         )
         score_text = (
             f"**Score:** {player1.mention}: {score[player1.id]} | "
@@ -169,7 +169,7 @@ async def rps(
         if final:
             if score["ties"] >= 7:  # If ties reached 7, it's an automatic draw
                 base += "\n\n🤝 **Match ends in a draw due to too many ties!**"
-            if score[player1.id] > score[player2.id]:
+            elif score[player1.id] > score[player2.id]:
                 base += f"\n\n🎉 **{player1.mention} wins the match!**"
             elif score[player2.id] > score[player1.id]:
                 base += f"\n\n🎉 **{player2.mention} wins the match!**"
@@ -218,10 +218,12 @@ async def rps(
         
         # Update last move display
         for pid, move in moves.items():
-            last_move[pid] = next(
+            emoji = next(
                 (emoji for emoji, name in EMOJI_TO_MOVE.items() if name == move),
                 "❌" if move is None else "❔"
             )
+            move_history[pid].append(emoji)  # Add to history
+            last_move[pid] = emoji  # Still track latest move for round results
 
         # Determine round result
         m1, m2 = moves[player1.id], moves[player2.id]
