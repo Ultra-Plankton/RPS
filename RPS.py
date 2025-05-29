@@ -167,6 +167,8 @@ async def rps(
         base = f"{header}{moves_text}{score_text}{result_text}"
         
         if final:
+            if score["ties"] >= 7:  # If ties reached 7, it's an automatic draw
+                base += "\n\n🤝 **Match ends in a draw due to too many ties!**"
             if score[player1.id] > score[player2.id]:
                 base += f"\n\n🎉 **{player1.mention} wins the match!**"
             elif score[player2.id] > score[player1.id]:
