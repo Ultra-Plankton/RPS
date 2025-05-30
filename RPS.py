@@ -140,7 +140,7 @@ async def rps(
     await interaction.response.send_message(
         f"🎮 **RPS Match Started!**\n"
         f"Away: {player1.mention}  vs  Home: {player2.mention}\n"
-        f"First to {wins} wins, or first to 7 total ties.\n"
+        f"First to {wins} wins, or first to 7 total ties will result in a draw.\n"
         f"{f'**Match:** {desc}' if desc else ''}"
     )
 
@@ -206,7 +206,7 @@ async def rps(
         try:
             await asyncio.wait_for(
                 asyncio.gather(view1.wait(), view2.wait()),
-                timeout=14400
+                timeout=30
             )
         except asyncio.TimeoutError:
             moves[player1.id] = None
