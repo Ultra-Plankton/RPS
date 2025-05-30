@@ -10,7 +10,7 @@ from discord.ext import commands
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 from typing import cast, Optional
-from datetime import datetime  # Add this line
+from datetime import datetime
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -138,6 +138,15 @@ async def rps(
         return await interaction.response.send_message(
             "Please choose a number of wins between 1 and 10", ephemeral=True
         )
+    
+    # Track the active match at start
+    if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
+        active_matches[interaction.channel.id] = {
+            "interaction": interaction,
+            "players": [player1.id, player2.id],
+            "start_time": datetime.now(),
+            "message": None  # Will store the scoreboard message
+        }
 
     # Announce match
     await interaction.response.send_message(
@@ -228,17 +237,19 @@ async def rps(
             move_history[pid].append(emoji)  # Add to history
             last_move[pid] = emoji  # Still track latest move for round results
 
+
         # Determine round result
         m1, m2 = moves[player1.id], moves[player2.id]
         if m1 is None and m2 is None:
-            result_text = "Both players timed out - round void."
-        elif m1 is None:
+            score["ties"] += 1
+            result_text = "Both players timed out - round counted as tie."
+        elif m1 is None:  # Only player1 timed out
             score[player2.id] += 1
-            result_text = f"{player2.mention} wins by forfeit (timeout)."
-        elif m2 is None:
+            result_text = f"{player2.mention} wins the round {player1.mention} timed out."
+        elif m2 is None:  # Only player2 timed out
             score[player1.id] += 1
-            result_text = f"{player1.mention} wins by forfeit (timeout)."
-        else:
+            result_text = f"{player1.mention} wins the round {player2.mention} timed out."
+        else:  # Both played normally
             winner = determine_winner(m1, m2)
             if winner == 1:
                 score[player1.id] += 1
@@ -293,6 +304,9 @@ async def rps(
         except discord.Forbidden:
             continue
 
+        if interaction.channel and interaction.channel.id in active_matches:
+            del active_matches[interaction.channel.id]
+
 @bot.tree.command(name="update", description="Pull latest from GitHub and redeploy on Render")
 @app_commands.check(is_guild_admin)
 async def update(interaction: discord.Interaction):
@@ -340,33 +354,39 @@ async def rps_cancel(
     reason: str = "No reason provided"
 ):
     """Allows admins to cancel stuck RPS matches"""
-    # Handle channel type safely
-    target_channel = None
-    if channel is not None:
-        target_channel = channel
-    elif isinstance(interaction.channel, discord.TextChannel):
-        target_channel = interaction.channel
-    else:
+    target_channel = channel or interaction.channel
+    
+    if not target_channel or not isinstance(target_channel, discord.TextChannel):
         return await interaction.response.send_message(
             "❌ This command only works in text channels!",
             ephemeral=True
         )
 
-    match_data = active_matches.get(target_channel.id)  # type: ignore
+    match_data = active_matches.get(target_channel.id)
     
     if not match_data:
         return await interaction.response.send_message(
-            f"❌ No active RPS match found in {target_channel.mention}",  # type: ignore
+            f"❌ No active RPS match found in {target_channel.mention}",
             ephemeral=True
         )
     
-    # Confirm cancellation
+    # Get player objects for the cancellation message
+    try:
+        player1 = await bot.fetch_user(match_data["players"][0])
+        player2 = await bot.fetch_user(match_data["players"][1])
+    except discord.NotFound:
+        return await interaction.response.send_message(
+            "❌ Couldn't find one or both players!",
+            ephemeral=True
+        )
+
+    # Create cancellation embed
     embed = discord.Embed(
         title="⚠️ RPS Match Cancelled",
         description=(
             f"**Admin:** {interaction.user.mention}\n"
             f"**Reason:** {reason}\n\n"
-            f"Match between <@{match_data['players'][0]}> and <@{match_data['players'][1]}> "
+            f"Match between {player1.mention} and {player2.mention} "
             f"was forcibly cancelled."
         ),
         color=discord.Color.red()
@@ -377,29 +397,19 @@ async def rps_cancel(
     duration_str = str(duration).split('.')[0]  # Removes microseconds
     embed.set_footer(text=f"Match duration: {duration_str}")
     
+    # Try to notify in the game channel
     try:
-        # Try to edit the original game message
-        await match_data["interaction"].edit_original_response(
-            content="",
-            embed=embed,
-            view=None
+        await target_channel.send(embed=embed)
+    except discord.Forbidden:
+        await interaction.followup.send(
+            "⚠️ Couldn't send cancellation message to the game channel",
+            ephemeral=True
         )
-    except Exception:
-        # Fallback to sending new message
-        try:
-            if target_channel:
-                await target_channel.send(embed=embed)
-        except Exception as e:
-            logging.error(f"Failed to send cancellation message: {e}")
-            await interaction.followup.send(
-                "⚠️ Match was cancelled but couldn't post notification",
-                ephemeral=True
-            )
     
-    # Clean up
-    del active_matches[target_channel.id]  # type: ignore
+    # Clean up and confirm
+    del active_matches[target_channel.id]
     await interaction.response.send_message(
-        f"✅ Successfully cancelled match in {target_channel.mention}",  # type: ignore
+        f"✅ Successfully cancelled match in {target_channel.mention}",
         ephemeral=True
     )
 bot.run(TOKEN)
