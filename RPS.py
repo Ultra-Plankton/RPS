@@ -10,6 +10,7 @@ from discord.ext import commands
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 from typing import cast, Optional
+from datetime import datetime  # Add this line
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -17,6 +18,8 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN env var not set")
+
+active_matches = {}  # Format: {channel_id: {"interaction": interaction_obj, "players": [id1, id2]}}
 
 keep_alive()
 
@@ -324,4 +327,79 @@ async def ping(interaction: discord.Interaction):
     latency_ms = round(bot.latency * 1000)
     await interaction.response.send_message(f"Pong! 🏓 Latency: {latency_ms}ms", ephemeral=True)
 
+
+@bot.tree.command(name="rps_cancel", description="[Admin] Cancel an ongoing RPS match")
+@app_commands.describe(
+    channel="Channel where match is happening (defaults to current)",
+    reason="Reason for cancellation"
+)
+@app_commands.default_permissions(manage_messages=True)
+async def rps_cancel(
+    interaction: discord.Interaction,
+    channel: Optional[discord.TextChannel] = None,
+    reason: str = "No reason provided"
+):
+    """Allows admins to cancel stuck RPS matches"""
+    # Handle channel type safely
+    target_channel = None
+    if channel is not None:
+        target_channel = channel
+    elif isinstance(interaction.channel, discord.TextChannel):
+        target_channel = interaction.channel
+    else:
+        return await interaction.response.send_message(
+            "❌ This command only works in text channels!",
+            ephemeral=True
+        )
+
+    match_data = active_matches.get(target_channel.id)  # type: ignore
+    
+    if not match_data:
+        return await interaction.response.send_message(
+            f"❌ No active RPS match found in {target_channel.mention}",  # type: ignore
+            ephemeral=True
+        )
+    
+    # Confirm cancellation
+    embed = discord.Embed(
+        title="⚠️ RPS Match Cancelled",
+        description=(
+            f"**Admin:** {interaction.user.mention}\n"
+            f"**Reason:** {reason}\n\n"
+            f"Match between <@{match_data['players'][0]}> and <@{match_data['players'][1]}> "
+            f"was forcibly cancelled."
+        ),
+        color=discord.Color.red()
+    )
+    
+    # Calculate and format duration
+    duration = datetime.now() - match_data['start_time']
+    duration_str = str(duration).split('.')[0]  # Removes microseconds
+    embed.set_footer(text=f"Match duration: {duration_str}")
+    
+    try:
+        # Try to edit the original game message
+        await match_data["interaction"].edit_original_response(
+            content="",
+            embed=embed,
+            view=None
+        )
+    except Exception:
+        # Fallback to sending new message
+        try:
+            if target_channel:
+                await target_channel.send(embed=embed)
+        except Exception as e:
+            logging.error(f"Failed to send cancellation message: {e}")
+            await interaction.followup.send(
+                "⚠️ Match was cancelled but couldn't post notification",
+                ephemeral=True
+            )
+    
+    # Clean up
+    del active_matches[target_channel.id]  # type: ignore
+    await interaction.response.send_message(
+        f"✅ Successfully cancelled match in {target_channel.mention}",  # type: ignore
+        ephemeral=True
+    )
 bot.run(TOKEN)
