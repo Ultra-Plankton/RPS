@@ -19,7 +19,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN env var not set")
 
-active_matches = {}  # Format: {channel_id: {"interaction": interaction_obj, "players": [id1, id2]}}
+active_matches = {}  # Format: {channel_id: {"interaction": interaction_obj, "players": [id1, id2], "cancelled": False}}
 
 keep_alive()
 
@@ -152,7 +152,7 @@ async def rps(
     await interaction.response.send_message(
         f"🎮 **RPS Match Started!**\n"
         f"Away: {player1.mention}  vs  Home: {player2.mention}\n"
-        f"First to {wins} wins, or first to 7 total ties will result in a draw.\n"
+        f"First to {wins} wins, first to 7 total ties ends in a draw.\n"
         f"{f'**Match:** {desc}' if desc else ''}"
     )
 
@@ -218,7 +218,7 @@ async def rps(
         try:
             await asyncio.wait_for(
                 asyncio.gather(view1.wait(), view2.wait()),
-                timeout=30
+                timeout=1440
             )
         except asyncio.TimeoutError:
             moves[player1.id] = None
