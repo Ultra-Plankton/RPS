@@ -132,7 +132,7 @@ async def rps(
     desc: str = ""
 ):
     # Only allow match creation in rps-start channel
-    RPS_START_CHANNEL_ID = 1403628570013601893  # Replace with your rps-start channel ID
+    RPS_START_CHANNEL_ID = 1403606266064011366  # Replace with your rps-start channel ID
     if not interaction.channel or interaction.channel.id != RPS_START_CHANNEL_ID:
         return await interaction.response.send_message(
             "You can only start matches in the rps-start channel.", ephemeral=True
@@ -470,4 +470,215 @@ async def rps_cancel(
         f"✅ Successfully cancelled match in {target_channel.mention}",
         ephemeral=True
     )
-bot.run(TOKEN)
+
+@bot.tree.command(name="rps_casual", description="Start a casual Rock Paper Scissors game between two users in any channel.")
+@app_commands.describe(
+    player1="Player 1",
+    player2="Player 2",
+    wins="Number of wins required to win the match",
+    desc="Short description (optional)"
+)
+async def rps_casual(
+    interaction: discord.Interaction,
+    player1: discord.User,
+    player2: discord.User,
+    wins: int,
+    desc: str = ""
+):
+    # Validation
+    if player1.bot or player2.bot:
+        return await interaction.response.send_message(
+            "You can't include bots as players!", ephemeral=True
+        )
+    if wins < 1 or wins > 10:
+        return await interaction.response.send_message(
+            "Please choose a number of wins between 1 and 10", ephemeral=True
+        )
+    # Track the active match at start
+    if not interaction.channel:
+        return await interaction.response.send_message(
+            "This command must be used in a server channel, not in DMs.", ephemeral=True
+        )
+    active_matches[interaction.channel.id] = {
+        "interaction": interaction,
+        "players": [player1.id, player2.id],
+        "start_time": datetime.now(),
+        "message": None
+    }
+    # Announce match
+    await interaction.response.send_message(
+        f"🎮 **Casual RPS Match Started!**\n"
+        f"{player1.mention} vs {player2.mention}\n"
+        f"First to {wins} wins. {f'**Match:** {desc}' if desc else ''}"
+    )
+
+    # Initialize score and move tracking
+    score = {
+        player1.id: 0,
+        player2.id: 0,
+        "ties": 0
+    }
+    move_history = {
+        player1.id: [],
+        player2.id: []
+    }
+    last_move = {player1.id: "❔", player2.id: "❔"}  # type: dict[int, str]
+    round_num = 1
+
+    # Create a scoreboard message
+    def create_scoreboard_message(final=False):
+        header = "📊 **Scoreboard:**\n"
+        moves_text = "🔄 **Move History:**\n"
+        for pid, history in move_history.items():
+            user = bot.get_user(pid)
+            mention = user.mention if user else f"User({pid})"
+            moves_text += f"{mention}: {' '.join(history) or 'No moves yet'}\n"
+        
+        # Sort players by score, then by ties
+        sorted_players = sorted(
+            [player1, player2],
+            key=lambda p: (score[p.id], -move_history[p.id].count("❌")),
+            reverse=True
+        )
+        
+        # Highlight the player in the lead
+        if score[sorted_players[0].id] > score[sorted_players[1].id]:
+            lead_emoji = "🏆"
+        else:
+            lead_emoji = "🤝"
+        
+        score_text = (
+            f"**Score:** {sorted_players[0].mention}: {score[sorted_players[0].id]} | "
+            f"{sorted_players[1].mention}: {score[sorted_players[1].id]} | "
+            f"Ties: {score['ties']}\n\n"
+        )
+        
+        result_text = ""
+        if final:
+            if score["ties"] >= 7:  # If ties reached 7, it's an automatic draw
+                result_text = "\n\n🤝 **Match ends in a draw due to too many ties!**"
+            elif score[player1.id] > score[player2.id]:
+                result_text = f"\n\n🎉 **{player1.mention} wins the match!**"
+            elif score[player2.id] > score[player1.id]:
+                result_text = f"\n\n🎉 **{player2.mention} wins the match!**"
+            else:
+                result_text = "\n\n🤝 **Match ends in a draw!**"
+        
+        return f"{header}{moves_text}{score_text}{result_text}"
+
+    # Initial scoreboard message
+    scoreboard_message = await send_to_channel(interaction, create_scoreboard_message())
+
+    # Main game loop
+    while True:
+        # Check win conditions
+        if score[player1.id] >= wins or score[player2.id] >= wins or score["ties"] >= 7:
+            break
+
+        # Get player moves
+        moves = {}
+        view1 = RPSView(player1)
+        view2 = RPSView(player2)
+        
+        # Send move requests
+        try:
+            dm1 = await player1.create_dm()
+            dm_msg1 = await dm1.send(f"**Round {round_num}:** Select your move (You have 30 seconds):", view=view1)
+            
+            dm2 = await player2.create_dm()
+            dm_msg2 = await dm2.send(f"**Round {round_num}:** Select your move (You have 30 seconds):", view=view2)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"⚠️ Couldn't DM players. Please enable DMs from server members.",
+                ephemeral=True
+            )
+            return
+
+        # Wait for moves
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(view1.wait(), view2.wait()),
+                timeout=30  # Timeout in seconds (set to 30 for testing)
+            )
+        except asyncio.TimeoutError:
+            moves[player1.id] = None
+            moves[player2.id] = None
+
+        # Record moves
+        moves[player1.id] = view1.choice
+        moves[player2.id] = view2.choice
+        
+        # Update last move display
+        for pid, move in moves.items():
+            emoji = next(
+                (emoji for emoji, name in EMOJI_TO_MOVE.items() if name == move),
+                "❌" if move is None else "❔"
+            )
+            move_history[pid].append(emoji)  # Add to history
+            last_move[pid] = emoji  # Still track latest move for round results
+
+
+        # Determine round result
+        m1, m2 = moves[player1.id], moves[player2.id]
+        if m1 is None and m2 is None:
+            score["ties"] += 1
+            result_text = "Both players timed out - round counted as tie."
+        elif m1 is None:  # Only player1 timed out
+            score[player2.id] = wins
+            result_text = f"{player2.mention} wins the match! {player1.mention} timed out and forfeits the game."
+            break
+        elif m2 is None:  # Only player2 timed out
+            score[player1.id] = wins
+            result_text = f"{player1.mention} wins the match! {player2.mention} timed out and forfeits the game."
+            break
+        else:  # Both played normally
+            winner = determine_winner(m1, m2)
+            if winner == 1:
+                score[player1.id] += 1
+                result_text = f"{player1.mention} wins the round!"
+            elif winner == 2:
+                score[player2.id] += 1
+                result_text = f"{player2.mention} wins the round!"
+            else:
+                score["ties"] += 1
+                result_text = "Round is a tie."
+
+        # Update scoreboard with proper message handling
+        summary = create_scoreboard_message()
+        try:
+            await scoreboard_message.edit(content=summary)
+        except (discord.NotFound, discord.HTTPException):
+            # If message was deleted or edit failed, send new one
+            scoreboard_message = await send_to_channel(interaction, summary)
+
+        # Send updates to players
+        for p in (player1, player2):
+            try:
+                dm = await p.create_dm()
+                await dm.send(
+                    f"**Round {round_num} Update**\n"
+                    f"{summary}\n\n"
+                    f"Next round starting soon..."
+                )
+            except discord.Forbidden:
+                continue
+
+        round_num += 1
+
+    # Final update with error handling
+    final_summary = create_scoreboard_message(final=True)
+    try:
+        await scoreboard_message.edit(content=final_summary)
+    except (discord.NotFound, discord.HTTPException):
+        scoreboard_message = await send_to_channel(interaction, final_summary)
+    
+    # Notify players of final result
+    for p in (player1, player2):
+        try:
+            dm = await p.create_dm()
+            await dm.send(f"**Match Complete!**\n{final_summary}")
+        except discord.Forbidden:
+            continue
+
+        if interaction.channel and interaction.channel.id in active_matches:
+            del active_matches[interaction.channel.id]
