@@ -74,7 +74,7 @@ EMOJIS = list(EMOJI_TO_MOVE.keys())
 
 class RPSView(ui.View):
     def __init__(self, player: discord.User):
-        super().__init__(timeout=14400)
+        super().__init__(timeout=30)
         self.player = player
         self.choice = None
     
