@@ -154,7 +154,8 @@ async def rps(
         f"🎮 **RPS Match Started!**\n"
         f"Away: {player1.mention}  vs  Home: {player2.mention}\n"
         f"First to {wins} wins, first to 7 total ties ends in a draw.\n"
-        f"{f'**Match:** {desc}' if desc else ''}"
+        f"{f'**Match:** {desc}' if desc else ''}\n"
+        f"⏳ You have 36 hours to play!"
     )
 
     # Initialize tracking
@@ -177,7 +178,10 @@ async def rps(
             f"{player2.mention}: {score[player2.id]} | "
             f"Ties: {score['ties']}\n\n"
         )
-        base = f"{header}{moves_text}{score_text}{result_text}"
+        # Calculate elapsed time
+        elapsed = (datetime.now() - active_matches[interaction.channel.id]["start_time"]).total_seconds() if interaction.channel and interaction.channel.id in active_matches else 0
+        duration_text = f"⏱️ Match duration: {int(elapsed)} seconds\n\n"
+        base = f"{header}{moves_text}{score_text}{duration_text}{result_text}"
         if final:
             if score["ties"] >= 7:  # If ties reached 7, it's an automatic draw
                 base += "\n\n🤝 **Match ends in a draw due to too many ties!**"
@@ -310,13 +314,18 @@ async def rps(
             final_summary += f"\n\n⏰ **Match timer expired! {player2.mention} wins by score!**"
         else:
             final_summary += "\n\n⏰ **Match timer expired! It's a draw!**"
+
+        # Add total match duration to the end message
+        elapsed = (datetime.now() - active_matches[interaction.channel.id]["start_time"]).total_seconds() if interaction.channel and interaction.channel.id in active_matches else 0
+        final_summary += f"\n\n⏱️ Match lasted {int(elapsed)} seconds"
+
+        # Always send a new message to the channel to announce match end
         try:
-            if scoreboard_message is not None:
-                await scoreboard_message.edit(content=final_summary)
-            else:
-                scoreboard_message = await send_to_channel(interaction, final_summary)
-        except (discord.NotFound, discord.HTTPException):
-            scoreboard_message = await send_to_channel(interaction, final_summary)
+            await send_to_channel(interaction, f"**⏰ Match Ended Due to Timer!**\n{final_summary}")
+        except Exception as e:
+            logging.error(f"Failed to send end message to channel: {e}")
+
+        # Also DM both players
         for p in (player1, player2):
             try:
                 dm = await p.create_dm()
