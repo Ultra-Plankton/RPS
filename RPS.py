@@ -74,7 +74,8 @@ EMOJIS = list(EMOJI_TO_MOVE.keys())
 
 class RPSView(ui.View):
     def __init__(self, player: discord.User):
-        super().__init__(timeout=30)
+        # UI timeout is now 5 minutes, but match timer controls the game
+        super().__init__(timeout=300)
         self.player = player
         self.choice = None
     
@@ -191,7 +192,7 @@ async def rps(
     # Main game loop
 
     # MATCH TIMER LOGIC
-    MATCH_TIMEOUT = 1440  # seconds (24 minutes)
+    MATCH_TIMEOUT = 30  # seconds (entire match must finish in 30 seconds)
     match_task = asyncio.create_task(asyncio.sleep(MATCH_TIMEOUT))
     match_ended = False
 
@@ -222,9 +223,17 @@ async def rps(
                 match_ended = True
                 return
 
-            # Wait for moves (no per-round timeout)
-            await asyncio.gather(view1.wait(), view2.wait())
-
+            # Wait for moves, but break if match timer is done
+            move_tasks = [asyncio.create_task(view1.wait()), asyncio.create_task(view2.wait())]
+            done, pending = await asyncio.wait(move_tasks, timeout=1)
+            # If match timer expired, break out of loop
+            if match_ended:
+                break
+            # If both moves are done, continue; else, keep waiting until match timer expires
+            while not all(t.done() for t in move_tasks):
+                await asyncio.sleep(0.5)
+                if match_ended:
+                    break
             # Record moves
             moves[player1.id] = view1.choice
             moves[player2.id] = view2.choice
