@@ -203,6 +203,9 @@ async def rps(
     async def play_match():
         nonlocal round_num, scoreboard_message, match_ended
         while True:
+            # Prevent starting a new round if match ended (timed out)
+            if match_ended:
+                break
             # Check win conditions
             if score[player1.id] >= wins or score[player2.id] >= wins or score["ties"] >= 7:
                 break
@@ -238,6 +241,9 @@ async def rps(
                 await asyncio.sleep(0.5)
                 if match_ended:
                     break
+            # If match ended during waiting, break before recording moves or updating scoreboard
+            if match_ended:
+                break
             # Record moves
             moves[player1.id] = view1.choice
             moves[player2.id] = view2.choice
