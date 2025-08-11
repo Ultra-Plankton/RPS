@@ -32,6 +32,68 @@ intents.reactions = True
 # Initialize bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+RESTRICTED_CHANNELS = {
+    1403629262715617321,
+    1403628570013601893,
+    1403628687940784148,
+    1403630668109320283,
+    1403628617346322492
+}
+
+@bot.tree.command(name="rps_start", description="Start a Rock Paper Scissors game between two users (anyone can use, except in restricted channels)")
+@app_commands.describe(
+    player1="Away Team player",
+    player2="Home Team player",
+    wins="Number of wins required to win the match",
+    desc="Short description (e.g. 'Week 1 Game 1')",
+    channel="Channel to keep the scores in"
+)
+async def rps_start(
+    interaction: discord.Interaction,
+    player1: discord.User,
+    player2: discord.User,
+    wins: int,
+    desc: str = "",
+    channel: Optional[discord.TextChannel] = None
+):
+    # Validation
+    if player1.bot or player2.bot:
+        return await interaction.response.send_message(
+            "You can't include bots as players!", ephemeral=True
+        )
+    if wins < 1 or wins > 10:
+        return await interaction.response.send_message(
+            "Please choose a number of wins between 1 and 10", ephemeral=True
+        )
+    # Require channel argument
+    if not channel or not isinstance(channel, discord.TextChannel):
+        return await interaction.response.send_message(
+            "❌ You must specify a valid text channel to keep scores in!",
+            ephemeral=True
+        )
+    # Restrict usage in certain channels
+    if channel.id in RESTRICTED_CHANNELS:
+        return await interaction.response.send_message(
+            f"❌ You cannot start games in {channel.mention} with this command!",
+            ephemeral=True
+        )
+    # Track the active match at start
+    active_matches[channel.id] = {
+        "interaction": interaction,
+        "players": [player1.id, player2.id],
+        "start_time": datetime.now(),
+        "message": None  # Will store the scoreboard message
+    }
+
+    # Announce match
+    await interaction.response.send_message(
+        f"🎮 **RPS Match Started!**\n"
+        f"Away: {player1.mention}  vs  Home: {player2.mention}\n"
+        f"First to {wins} wins, first to 7 total ties ends in a draw.\n"
+        f"{f'**Match:** {desc}' if desc else ''}\n"
+        f"⏳ You have 36 hours to play!\n"
+        f"Scores will be kept in {channel.mention}"
+    )
 async def send_to_channel(interaction: discord.Interaction, content: str) -> discord.Message:
     """Safely send a message to the interaction's channel with fallbacks"""
     # Always send to the score-keeping channel if available
@@ -125,7 +187,7 @@ async def on_ready():
     except Exception as e:
         logging.error(f"❌ Error syncing commands: {e}")
 
-@bot.tree.command(name="rps", description="Start a Rock Paper Scissors game between two users.")
+@bot.tree.command(name="season_rps", description="Start a Rock Paper Scissors game between two users.")
 @app_commands.describe(
     player1="Away Team player",
     player2="Home Team player",
