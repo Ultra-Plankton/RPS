@@ -157,8 +157,9 @@ async def rps(
             ephemeral=True
         )
     # Admin check for score-keeping channels
-    member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
-    if not (member and member.guild_permissions.administrator):
+    # More reliable admin check
+    member = getattr(interaction.user, 'guild_permissions', None)
+    if not (member and member.administrator):
         return await interaction.response.send_message(
             f"❌ Only admins can start games in {channel.mention}!",
             ephemeral=True
