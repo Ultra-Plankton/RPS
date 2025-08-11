@@ -94,6 +94,208 @@ async def rps_start(
         f"⏳ You have 36 hours to play!\n"
         f"Scores will be kept in {channel.mention}"
     )
+
+    # Initialize tracking
+    score = {player1.id: 0, player2.id: 0, "ties": 0}
+    move_history = {player1.id: [], player2.id: []}  # Stores all moves (e.g., ["✊", "✋", "✌️"])
+    last_move = {player1.id: "❔", player2.id: "❔"}
+    round_num = 1
+    scoreboard_message: Optional[discord.Message] = None
+
+    result_text = ""
+    def make_summary(final=False) -> str:
+        header = f"**{desc}**\n" if desc else ""
+        moves_text = (
+            f"**Moves:**\n"
+            f"{player1.mention}: {', '.join(move_history[player1.id])}\n"
+            f"{player2.mention}: {', '.join(move_history[player2.id])}\n\n"
+        )
+        score_text = (
+            f"**Score:** {player1.mention}: {score[player1.id]} | "
+            f"{player2.mention}: {score[player2.id]} | "
+            f"Ties: {score['ties']}\n\n"
+        )
+        # Calculate elapsed time
+        elapsed = (datetime.now() - active_matches[channel.id]["start_time"]).total_seconds() if channel.id in active_matches else 0
+        duration_text = f"⏱️ Match duration: {int(elapsed)} seconds\n\n"
+        base = f"{header}{moves_text}{score_text}{duration_text}{result_text}"
+        if final:
+            if score["ties"] >= 7:  # If ties reached 7, it's an automatic draw
+                base += "\n\n🤝 **Match ends in a draw due to too many ties!**"
+            elif score[player1.id] > score[player2.id]:
+                base += f"\n\n🎉 **{player1.mention} wins the match!**"
+            elif score[player2.id] > score[player1.id]:
+                base += f"\n\n🎉 **{player2.mention} wins the match!**"
+            else:
+                base += "\n\n🤝 **Match ends in a draw!**"
+        return base
+
+    # Main game loop
+
+    # MATCH TIMER LOGIC
+    MATCH_TIMEOUT = 30  # seconds (entire match must finish in 30 seconds)
+    match_task = asyncio.create_task(asyncio.sleep(MATCH_TIMEOUT))
+    match_ended = False
+
+    async def play_match():
+        nonlocal round_num, scoreboard_message, match_ended
+        while True:
+            # Prevent starting a new round if match ended (timed out)
+            if match_ended:
+                break
+            # Check win conditions
+            if score[player1.id] >= wins or score[player2.id] >= wins or score["ties"] >= 7:
+                break
+
+            # Get player moves
+            moves = {}
+            view1 = RPSView(player1)
+            view2 = RPSView(player2)
+
+            # Send move requests
+            try:
+                dm1 = await player1.create_dm()
+                dm_msg1 = await dm1.send(f"**Round {round_num}:** Select your move:", view=view1)
+
+                dm2 = await player2.create_dm()
+                dm_msg2 = await dm2.send(f"**Round {round_num}:** Select your move:", view=view2)
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    f"⚠️ Couldn't DM players. Please enable DMs from server members.",
+                    ephemeral=True
+                )
+                match_ended = True
+                return
+
+            # Wait for moves, but break if match timer is done
+            move_tasks = [asyncio.create_task(view1.wait()), asyncio.create_task(view2.wait())]
+            done, pending = await asyncio.wait(move_tasks, timeout=1)
+            # If match timer expired, break out of loop
+            if match_ended:
+                break
+            # If both moves are done, continue; else, keep waiting until match timer expires
+            while not all(t.done() for t in move_tasks):
+                await asyncio.sleep(0.5)
+                if match_ended:
+                    break
+            # If match ended during waiting, break before recording moves or updating scoreboard
+            if match_ended:
+                break
+            # Record moves
+            moves[player1.id] = view1.choice
+            moves[player2.id] = view2.choice
+
+            # Update last move display
+            for pid, move in moves.items():
+                emoji = next(
+                    (emoji for emoji, name in EMOJI_TO_MOVE.items() if name == move),
+                    "❌" if move is None else "❔"
+                )
+                move_history[pid].append(emoji)  # Add to history
+                last_move[pid] = emoji  # Still track latest move for round results
+
+            # Determine round result
+            m1, m2 = moves[player1.id], moves[player2.id]
+            if m1 is None and m2 is None:
+                score["ties"] += 1
+                result_text = "Both players failed to play - round counted as tie."
+            elif m1 is None:
+                score[player2.id] += 1
+                result_text = f"{player2.mention} wins the round {player1.mention} failed to play."
+            elif m2 is None:
+                score[player1.id] += 1
+                result_text = f"{player1.mention} wins the round {player2.mention} failed to play."
+            else:
+                winner = determine_winner(m1, m2)
+                if winner == 1:
+                    score[player1.id] += 1
+                    result_text = f"{player1.mention} wins the round!"
+                elif winner == 2:
+                    score[player2.id] += 1
+                    result_text = f"{player2.mention} wins the round!"
+                else:
+                    score["ties"] += 1
+                    result_text = "Round is a tie."
+
+            # Update scoreboard
+            summary = make_summary()
+            try:
+                if scoreboard_message is None:
+                    scoreboard_message = await send_to_channel(interaction, summary)
+                else:
+                    await scoreboard_message.edit(content=summary)
+            except (discord.NotFound, discord.HTTPException):
+                scoreboard_message = await send_to_channel(interaction, summary)
+
+            # Send updates to players
+            for p in (player1, player2):
+                try:
+                    dm = await p.create_dm()
+                    await dm.send(
+                        f"**Round {round_num} Update**\n"
+                        f"{summary}\n\n"
+                        f"Next round starting soon..."
+                    )
+                except discord.Forbidden:
+                    continue
+
+            round_num += 1
+
+    # Run match and timer concurrently
+    play_task = asyncio.create_task(play_match())
+    done, pending = await asyncio.wait([play_task, match_task], return_when=asyncio.FIRST_COMPLETED)
+
+    # If match timer expired before match ended
+    if match_task in done and not play_task.done():
+        match_ended = True
+        # End match and declare winner
+        # If one player has more points, they win; if tied, it's a draw
+        final_summary = make_summary(final=True)
+        if score[player1.id] > score[player2.id]:
+            final_summary += f"\n\n⏰ **Match timer expired! {player1.mention} wins by score!**"
+        elif score[player2.id] > score[player1.id]:
+            final_summary += f"\n\n⏰ **Match timer expired! {player2.mention} wins by score!**"
+        else:
+            final_summary += "\n\n⏰ **Match timer expired! It's a draw!**"
+
+        # Add total match duration to the end message
+        elapsed = (datetime.now() - active_matches[channel.id]["start_time"]).total_seconds() if channel.id in active_matches else 0
+        final_summary += f"\n\n⏱️ Match lasted {int(elapsed)} seconds"
+
+        # Always send a new message to the channel to announce match end
+        try:
+            await send_to_channel(interaction, f"**⏰ Match Ended Due to Timer!**\n{final_summary}")
+        except Exception as e:
+            logging.error(f"Failed to send end message to channel: {e}")
+
+        # Also DM both players
+        for p in (player1, player2):
+            try:
+                dm = await p.create_dm()
+                await dm.send(f"**Match Complete!**\n{final_summary}")
+            except discord.Forbidden:
+                continue
+        if channel.id in active_matches:
+            del active_matches[channel.id]
+        return
+
+    # If match finished normally
+    final_summary = make_summary(final=True)
+    try:
+        if scoreboard_message is not None:
+            await scoreboard_message.edit(content=final_summary)
+        else:
+            scoreboard_message = await send_to_channel(interaction, final_summary)
+    except (discord.NotFound, discord.HTTPException):
+        scoreboard_message = await send_to_channel(interaction, final_summary)
+    for p in (player1, player2):
+        try:
+            dm = await p.create_dm()
+            await dm.send(f"**Match Complete!**\n{final_summary}")
+        except discord.Forbidden:
+            continue
+    if channel.id in active_matches:
+        del active_matches[channel.id]
 async def send_to_channel(interaction: discord.Interaction, content: str) -> discord.Message:
     """Safely send a message to the interaction's channel with fallbacks"""
     # Always send to the score-keeping channel if available
