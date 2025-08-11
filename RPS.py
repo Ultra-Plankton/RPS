@@ -121,14 +121,16 @@ async def on_ready():
     player1="Away Team player",
     player2="Home Team player",
     wins="Number of wins required to win the match",
-    desc="Short description (e.g. 'Week 1 Game 1')"
+    desc="Short description (e.g. 'Week 1 Game 1')",
+    channel="Channel to keep the scores in"
 )
 async def rps(
     interaction: discord.Interaction,
     player1: discord.User,
     player2: discord.User,
     wins: int,
-    desc: str = ""
+    desc: str = "",
+    channel: Optional[discord.TextChannel] = None
 ):
     # Validation
     if player1.bot or player2.bot:
@@ -139,15 +141,27 @@ async def rps(
         return await interaction.response.send_message(
             "Please choose a number of wins between 1 and 10", ephemeral=True
         )
-    
+    # Use provided channel or default to current
+    target_channel = channel or interaction.channel
+    if not target_channel or not isinstance(target_channel, discord.TextChannel):
+        return await interaction.response.send_message(
+            "❌ You must specify a valid text channel to keep scores in!",
+            ephemeral=True
+        )
+    # Admin check for score-keeping channels
+    member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
+    if member and not member.guild_permissions.administrator:
+        return await interaction.response.send_message(
+            f"❌ Only admins can start games in {target_channel.mention}!",
+            ephemeral=True
+        )
     # Track the active match at start
-    if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
-        active_matches[interaction.channel.id] = {
-            "interaction": interaction,
-            "players": [player1.id, player2.id],
-            "start_time": datetime.now(),
-            "message": None  # Will store the scoreboard message
-        }
+    active_matches[target_channel.id] = {
+        "interaction": interaction,
+        "players": [player1.id, player2.id],
+        "start_time": datetime.now(),
+        "message": None  # Will store the scoreboard message
+    }
 
     # Announce match
     await interaction.response.send_message(
@@ -155,7 +169,8 @@ async def rps(
         f"Away: {player1.mention}  vs  Home: {player2.mention}\n"
         f"First to {wins} wins, first to 7 total ties ends in a draw.\n"
         f"{f'**Match:** {desc}' if desc else ''}\n"
-        f"⏳ You have 36 hours to play!"
+        f"⏳ You have 36 hours to play!\n"
+        f"Scores will be kept in {target_channel.mention}"
     )
 
     # Initialize tracking
