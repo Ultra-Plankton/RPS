@@ -34,7 +34,16 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 async def send_to_channel(interaction: discord.Interaction, content: str) -> discord.Message:
     """Safely send a message to the interaction's channel with fallbacks"""
-    # First try sending directly to a text channel or thread
+    # Always send to the score-keeping channel if available
+    channel_id = None
+    if hasattr(interaction, 'channel') and interaction.channel:
+        channel_id = interaction.channel.id
+    # Try to use the active match's channel if possible
+    if channel_id and channel_id in active_matches:
+        score_channel = interaction.guild.get_channel(channel_id) if interaction.guild else None
+        if score_channel and isinstance(score_channel, (discord.TextChannel, discord.Thread)):
+            return await score_channel.send(content)
+    # Fallback to original logic
     if interaction.channel and isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
         return await interaction.channel.send(content)
     
@@ -141,22 +150,21 @@ async def rps(
         return await interaction.response.send_message(
             "Please choose a number of wins between 1 and 10", ephemeral=True
         )
-    # Use provided channel or default to current
-    target_channel = channel or interaction.channel
-    if not target_channel or not isinstance(target_channel, discord.TextChannel):
+    # Require channel argument
+    if not channel or not isinstance(channel, discord.TextChannel):
         return await interaction.response.send_message(
             "❌ You must specify a valid text channel to keep scores in!",
             ephemeral=True
         )
     # Admin check for score-keeping channels
     member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
-    if member and not member.guild_permissions.administrator:
+    if not (member and member.guild_permissions.administrator):
         return await interaction.response.send_message(
-            f"❌ Only admins can start games in {target_channel.mention}!",
+            f"❌ Only admins can start games in {channel.mention}!",
             ephemeral=True
         )
     # Track the active match at start
-    active_matches[target_channel.id] = {
+    active_matches[channel.id] = {
         "interaction": interaction,
         "players": [player1.id, player2.id],
         "start_time": datetime.now(),
@@ -170,7 +178,7 @@ async def rps(
         f"First to {wins} wins, first to 7 total ties ends in a draw.\n"
         f"{f'**Match:** {desc}' if desc else ''}\n"
         f"⏳ You have 36 hours to play!\n"
-        f"Scores will be kept in {target_channel.mention}"
+        f"Scores will be kept in {channel.mention}"
     )
 
     # Initialize tracking
@@ -194,7 +202,7 @@ async def rps(
             f"Ties: {score['ties']}\n\n"
         )
         # Calculate elapsed time
-        elapsed = (datetime.now() - active_matches[interaction.channel.id]["start_time"]).total_seconds() if interaction.channel and interaction.channel.id in active_matches else 0
+        elapsed = (datetime.now() - active_matches[channel.id]["start_time"]).total_seconds() if channel.id in active_matches else 0
         duration_text = f"⏱️ Match duration: {int(elapsed)} seconds\n\n"
         base = f"{header}{moves_text}{score_text}{duration_text}{result_text}"
         if final:
