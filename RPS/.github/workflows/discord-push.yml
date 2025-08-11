@@ -1,0 +1,42 @@
+name: Notify Discord on Push
+
+on:
+  push:
+    branches:
+      - main      # ← change if your default branch is different
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dump entire event for debugging
+        run: |
+          echo "GITHUB EVENT:"
+          echo "${{ toJson(github.event) }}"
+
+      - name: Send Discord notification
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // use the provided `context` object
+            const payload = context.payload;
+
+            if (!payload.head_commit) {
+              console.log("⚠️ No head_commit, skipping Discord post.");
+              return;
+            }
+
+            const commit = payload.head_commit;
+            const repo   = payload.repository.full_name;
+            const msg = `📝 **${repo}** pushed by **${commit.author.name}**:\n> ${commit.message}\n${commit.url}`;
+            console.log("✅ Posting to Discord:", msg);
+
+            await fetch(process.env.DISCORD_WEBHOOK, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: msg })
+            });
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
