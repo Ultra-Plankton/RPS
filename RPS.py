@@ -221,11 +221,11 @@ async def rps_start(
             summary = make_summary()
             try:
                 if scoreboard_message is None:
-                    scoreboard_message = await send_to_channel(interaction, summary)
+                    scoreboard_message = await send_to_channel(interaction, summary, channel)
                 else:
                     await scoreboard_message.edit(content=summary)
             except (discord.NotFound, discord.HTTPException):
-                scoreboard_message = await send_to_channel(interaction, summary)
+                scoreboard_message = await send_to_channel(interaction, summary, channel)
 
             # Send updates to players
             for p in (player1, player2):
@@ -264,7 +264,7 @@ async def rps_start(
 
         # Always send a new message to the channel to announce match end
         try:
-            await send_to_channel(interaction, f"**⏰ Match Ended Due to Timer!**\n{final_summary}")
+            await send_to_channel(interaction, f"**⏰ Match Ended Due to Timer!**\n{final_summary}", channel)
         except Exception as e:
             logging.error(f"Failed to send end message to channel: {e}")
 
@@ -285,9 +285,9 @@ async def rps_start(
         if scoreboard_message is not None:
             await scoreboard_message.edit(content=final_summary)
         else:
-            scoreboard_message = await send_to_channel(interaction, final_summary)
+            scoreboard_message = await send_to_channel(interaction, final_summary, channel)
     except (discord.NotFound, discord.HTTPException):
-        scoreboard_message = await send_to_channel(interaction, final_summary)
+        scoreboard_message = await send_to_channel(interaction, final_summary, channel)
     for p in (player1, player2):
         try:
             dm = await p.create_dm()
@@ -296,25 +296,17 @@ async def rps_start(
             continue
     if channel.id in active_matches:
         del active_matches[channel.id]
-async def send_to_channel(interaction: discord.Interaction, content: str) -> discord.Message:
-    """Safely send a message to the interaction's channel with fallbacks"""
-    # Always send to the score-keeping channel if available
-    channel_id = None
-    if hasattr(interaction, 'channel') and interaction.channel:
-        channel_id = interaction.channel.id
-    # Try to use the active match's channel if possible
-    if channel_id and channel_id in active_matches:
-        score_channel = interaction.guild.get_channel(channel_id) if interaction.guild else None
-        if score_channel and isinstance(score_channel, (discord.TextChannel, discord.Thread)):
-            return await score_channel.send(content)
-    # Fallback to original logic
+async def send_to_channel(interaction: discord.Interaction, content: str, channel: Optional[discord.TextChannel] = None) -> discord.Message:
+    """Safely send a message to the specified score-keeping channel, with fallbacks"""
+    # Always send to the score-keeping channel if provided
+    if channel and isinstance(channel, (discord.TextChannel, discord.Thread)):
+        return await channel.send(content)
+    # Fallback to the interaction's channel
     if interaction.channel and isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
         return await interaction.channel.send(content)
-    
     # If we haven't responded yet, defer first
     if not interaction.response.is_done():
         await interaction.response.defer(thinking=True)
-    
     # Use followup with proper type handling
     followup_msg = await interaction.followup.send(content)
     if followup_msg is None:
@@ -326,7 +318,6 @@ async def send_to_channel(interaction: discord.Interaction, content: str) -> dis
                     return await msg.channel.send(content)
         except Exception as e:
             logging.error(f"Failed to send message: {e}")
-    
     if followup_msg is None:
         raise RuntimeError("All message sending methods failed")
     return followup_msg
